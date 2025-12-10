@@ -1,14 +1,14 @@
 import os
+import json
+import redis
+from datetime import datetime, timedelta
+from typing import List
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-from typing import List
-import redis
-import json
 
 from database import get_db, engine
 from models import Base, User, WishList, WishItem, WishItemStatus
@@ -23,39 +23,31 @@ from crud import (
     get_item_statuses
 )
 
+# Створюємо таблиці
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Wish List API", version="1.0.0")
+# Ініціалізація додатка
 app = FastAPI(
     title="Wish List API",
     version="1.0.0",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
+
+# --- ВИПРАВЛЕНИЙ БЛОК CORS (БЕЗ ВІДСТУПІВ ЗЛІВА) ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=False, 
+    allow_origins=["*"],      # Дозволяємо всім
+    allow_credentials=False,  # Вимикаємо credentials для wildcards (*)
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+# ---------------------------------------------------
 
 load_dotenv(override=False)
 
+# Налаштування Redis
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
-
-origins = [origin.strip() for origin in ALLOWED_ORIGINS.split(",")]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 redis_env_url = os.getenv("REDIS_URL")
 if redis_env_url:
     REDIS_URL = redis_env_url
@@ -63,15 +55,6 @@ else:
     REDIS_URL = "redis://redis:6379" if ENVIRONMENT.lower() == "docker" else "redis://localhost:6379"
 
 redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-
-
-
-# redis_client = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
-
-# docker run -d \
-#   --name redis \
-#   -p 6379:6379 \
-#   redis:7-alpine
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -115,9 +98,7 @@ async def create_new_wishlist(
         db: Session = Depends(get_db)
 ):
     new_wishlist = create_wishlist(db=db, wishlist=wishlist, user_id=current_user.id)
-
     redis_client.delete("all_wishlists")
-
     return new_wishlist
 
 
@@ -132,7 +113,6 @@ async def get_all_wishlists(db: Session = Depends(get_db)):
     redis_client.setex("all_wishlists", 300, json.dumps(
         [wishlist.to_dict() for wishlist in wishlists]
     ))
-
     return wishlists
 
 
@@ -280,7 +260,6 @@ async def get_item_status_history(
     return serialized_statuses
 
 
-
 @app.get("/health")
 async def health_check():
     try:
@@ -298,5 +277,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)
